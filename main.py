@@ -3,13 +3,14 @@ import os
 from http import HTTPStatus
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.http11 import Response
+import streamlit as st
 
 PORT = int(os.environ.get("PORT", 10000))
 
 async def echo(websocket):
     print("Client connected")
     async for message in websocket:
-        print("Received:", message)
+        st.write(f"Received message: {message}")
         await websocket.send(f"Echo: {message}")
 
 class RenderServerConnection(ServerConnection):
