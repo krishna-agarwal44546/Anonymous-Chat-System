@@ -2,7 +2,7 @@ import asyncio
 import os
 from http import HTTPStatus
 from websockets.asyncio.server import ServerConnection, serve
-from websockets.exceptions import InvalidMessage
+from websockets.http11 import Response
 
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -13,21 +13,25 @@ async def echo(websocket):
         await websocket.send(f"Echo: {message}")
 
 class RenderServerConnection(ServerConnection):
-    async def handshake(self, *args, **kwargs):
-        try:
-            return await super().handshake(*args, **kwargs)
-        except InvalidMessage as exc:
-            # Check if the failure was due to Render's HEAD health check
-            if "unsupported HTTP method; expected GET; got HEAD" in str(exc.__cause__):
-                # Respond with a clean HTTP 200 OK to Render's probe
-                self.transport.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
-                self.transport.close()
-                # Suppress the exception so your logs stay clean
-                raise asyncio.CancelledError()
-            raise exc
+    def respond_to_invalid_request(self, exception):
+        """
+        Intercepts requests that fail the WebSocket handshake (like Render's health checks)
+        and returns a standard HTTP response.
+        """
+        # If Render sends a HEAD request, the underlying cause will mention 'got HEAD'
+        if exception.__cause__ and "got HEAD" in str(exception.__cause__):
+            # Return a valid HTTP response cleanly. Websockets handles the transport closure.
+            return Response(
+                status_code=HTTPStatus.OK,
+                reason_phrase="OK",
+                headers=[],
+                body=b""  # HEAD requests must have an empty body
+            )
+        
+        # Fallback to default library behavior for genuine bad requests
+        return super().respond_to_invalid_request(exception)
 
 async def main():
-    # Use create_connection to inject our custom connection handler
     async with serve(
         echo,
         "0.0.0.0",
